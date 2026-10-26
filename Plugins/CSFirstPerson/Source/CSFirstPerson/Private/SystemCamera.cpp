@@ -194,6 +194,11 @@ void ASystemCamera::UpdateRotationState(float DeltaTime)
 		CurrentState.Rotation = TargetState.Rotation;
 		return;
 	}
+	if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Position.Equals(TargetState.Position, 0.1f))
+	{
+		CurrentState.Rotation = TargetState.Rotation;
+		return;
+	}
 	const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
 	CurrentState.Rotation = FMath::RInterpTo(CurrentState.Rotation, TargetState.Rotation, DeltaTime, Speed);
 	if (CurrentState.Rotation.Equals(TargetState.Rotation, 0.1f))
@@ -227,6 +232,15 @@ void ASystemCamera::UpdateControlSettings(float DeltaTime)
 	const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
 	auto UpdateFloat = [this, DeltaTime, Speed](float& Current, float Target)
 		{
+			if (Current == Target)
+			{
+				return;
+			}
+			/*if (((Current == CurrentState.OrbitYaw || Current == CurrentState.OrbitPitch) && (Target == TargetState.OrbitYaw || Target == TargetState.OrbitPitch) ) && CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Rotation.Equals(TargetState.Rotation, 5.f))
+			{
+				Current = Target;
+				return;
+			}*/
 			if (TransitionMode == EGlobalCameraTransitionMode::Instant)
 			{
 				Current = Target;
@@ -250,10 +264,15 @@ void ASystemCamera::UpdateControlSettings(float DeltaTime)
 }
 void ASystemCamera::UpdateCameraRotation(float LookX, float LookY)
 {
+	if (CurrentState.ControlMode == EGlobalCameraControlMode::None) // || !(CurrentState.Rotation.Equals(TargetState.Rotation, 0.1f) && CurrentState.Position.Equals(TargetState.Position, 0.1f))
+	{
+		return;
+	}
 	if (FMath::IsNearlyZero(LookX) && FMath::IsNearlyZero(LookY))
 	{
 		return;
 	}
+	
 	TargetState.OrbitYaw = FRotator::NormalizeAxis(TargetState.OrbitYaw + LookX * TargetState.MouseSensitivity);
 	TargetState.OrbitPitch = FMath::Clamp(
 		TargetState.OrbitPitch + LookY * TargetState.MouseSensitivity,
@@ -262,8 +281,9 @@ void ASystemCamera::UpdateCameraRotation(float LookX, float LookY)
 	);
 	TargetState.Rotation.Yaw = TargetState.OrbitYaw;
 	TargetState.Rotation.Pitch = TargetState.OrbitPitch;
-	TargetState.bLookAtTarget = false;
-	TargetState.bUseTargetRotation = false;
+	
+	//TargetState.bLookAtTarget = false;
+	//TargetState.bUseTargetRotation = false;
 }
 void ASystemCamera::UpdateCameraTransform(float DeltaTime)
 {
@@ -285,29 +305,37 @@ void ASystemCamera::UpdateCameraTransform(float DeltaTime)
 			PlayerTarget->GetActorLocation()
 		);
 	}
-
-	if (TransitionMode == EGlobalCameraTransitionMode::Instant || DeltaTime <= 0.f)
+	if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Position.Equals(TargetState.Position, 0.1f))
 	{
 		SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
 	}
 	else
 	{
-		const FVector NewLocation = FMath::VInterpTo(
-			GetActorLocation(),
-			DesiredLocation,
-			DeltaTime,
-			FMath::Max(CurrentState.MovementSpeed, 0.01f)
-		);
-		const bool bDirectMouseControl = !CurrentState.bUseTargetRotation && !CurrentState.bLookAtTarget;
-		const FRotator NewRotation = bDirectMouseControl
-			? CurrentState.Rotation
-			: FMath::RInterpTo(
-				GetActorRotation(),
-				DesiredRotation,
+		if (TransitionMode == EGlobalCameraTransitionMode::Instant || DeltaTime <= 0.f || (CurrentState.RotationSpeed <= 0.f || CurrentState.MovementSpeed <= 0.f))
+		{
+			SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
+		}
+		else
+		{
+			const FVector NewLocation = FMath::VInterpTo(
+				GetActorLocation(),
+				DesiredLocation,
 				DeltaTime,
-				FMath::Max(CurrentState.RotationSpeed, 0.01f)
+				FMath::Max(CurrentState.MovementSpeed, 0.1f)
 			);
-		SetActorLocationAndRotation(NewLocation, NewRotation);
+			const bool bDirectMouseControl = !CurrentState.bUseTargetRotation && !CurrentState.bLookAtTarget;
+			const FRotator NewRotation = bDirectMouseControl
+				? CurrentState.Rotation
+				: FMath::RInterpTo(
+					GetActorRotation(),
+					DesiredRotation,
+					DeltaTime,
+					FMath::Max(CurrentState.RotationSpeed, 0.1f)
+				);
+			
+			
+			SetActorLocationAndRotation(NewLocation, NewRotation);
+		}
 	}
 
 	if (CameraComponent)
