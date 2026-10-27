@@ -265,7 +265,7 @@ void ASystemCameraEventer::ApplyCameraSettings()
 
 	ApplyTargets(ConnectTarget);
 
-	GameCamera->SetCameraState(CameraState, TransitionMode);
+	GameCamera->SetCameraState(TargetState, TransitionMode);
 }
 
 void ASystemCameraEventer::StartPath()
@@ -325,7 +325,7 @@ void ASystemCameraEventer::StopPath()
 	}
 
 	GameCamera->SetConnectTarget(RestoreConnectTarget);
-	GameCamera->SetCameraState(RestoreCameraState, RestoreTransitionMode);
+	GameCamera->SetCameraState(RestoreTargetState, RestoreTransitionMode);
 }
 
 bool ASystemCameraEventer::FindClosestPathDistance(float& OutDistance) const
@@ -430,9 +430,9 @@ void ASystemCameraEventer::UpdatePath(float DeltaTime)
 
 	const FVector WorldPosition = ActiveSpline->GetLocationAtDistanceAlongSpline(CurrentPathDistance, ESplineCoordinateSpace::World);
 
-	FGlobalCameraState State = CameraState;
+	FGlobalCameraState State = TargetState;
 
-	switch (CameraState.PositionMode)
+	switch (TargetState.PositionMode)
 	{
 	case EGlobalCameraPositionMode::World:
 	{
@@ -479,7 +479,7 @@ void ASystemCameraEventer::UpdatePath(float DeltaTime)
 	}
 	}
 
-	/*if (CameraState.bUsePathRotation)
+	/*if (TargetState.bUsePathRotation)
 	{
 		const FRotator PathRotation = ActiveSpline->GetRotationAtDistanceAlongSpline(CurrentPathDistance, ESplineCoordinateSpace::World);
 
@@ -521,7 +521,7 @@ void ASystemCameraEventer::ApplyPathRotation()
 		return;
 	}*/
 
-	if (!CameraState.bUsePathRotation)
+	if (!TargetState.bUsePathRotation)
 	{
 		//GameCamera->ClearPathRotation();
 		return;
@@ -529,7 +529,7 @@ void ASystemCameraEventer::ApplyPathRotation()
 
 	const FRotator WorldRotation = ActiveSpline->GetRotationAtDistanceAlongSpline(CurrentPathDistance, ESplineCoordinateSpace::World);
 
-	if (CameraState.PositionMode == EGlobalCameraPositionMode::World)
+	if (TargetState.PositionMode == EGlobalCameraPositionMode::World)
 	{
 		//GameCamera->SetPathRotation(WorldRotation);
 		return;
@@ -537,11 +537,11 @@ void ASystemCameraEventer::ApplyPathRotation()
 
 	AActor* Target = nullptr;
 
-	if (CameraState.PositionMode == EGlobalCameraPositionMode::PlayerTarget)
+	if (TargetState.PositionMode == EGlobalCameraPositionMode::PlayerTarget)
 	{
 		Target = GameCamera->GetPlayerTarget();
 	}
-	else if (CameraState.PositionMode == EGlobalCameraPositionMode::ConnectTarget)
+	else if (TargetState.PositionMode == EGlobalCameraPositionMode::ConnectTarget)
 	{
 		Target = GameCamera->GetConnectTarget();
 	}
@@ -557,89 +557,127 @@ void ASystemCameraEventer::ApplyPathRotation()
 	//GameCamera->SetPathRotation(RelativeRotation);
 }
 
+
 #if WITH_EDITOR
 
-bool ASystemCameraEventer::ConfirmOverwrite() const
-{
-	const EAppReturnType::Type Result = FMessageDialog::Open(
-		EAppMsgType::YesNo,
-		NSLOCTEXT(
-			"GameCameraEventer",
-			"OverwritePreset",
-			"Preset already exists. Overwrite it?"
-		)
-	);
-
-	return Result == EAppReturnType::Yes;
-}
-
-AActor* ASystemCameraEventer::FindActorByName(const FName& ActorName) const
-{
-	if (ActorName.IsNone() || !GetWorld())
+	bool ASystemCameraEventer::ConfirmOverwrite() const
 	{
+		const EAppReturnType::Type Result = FMessageDialog::Open(
+			EAppMsgType::YesNo,
+			NSLOCTEXT(
+				"SystemCameraEventer",
+				"OverwritePreset",
+				"Preset already exists. Overwrite it?"
+			)
+		);
+		return Result == EAppReturnType::Yes;
+	}
+
+	AActor* ASystemCameraEventer::FindActorByName(const FName& ActorName) const
+	{
+		if (ActorName.IsNone() || !GetWorld())
+		{
+			return nullptr;
+		}
+		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+		{
+			if (It->GetFName() == ActorName)
+			{
+				return *It;
+			}
+		}
 		return nullptr;
 	}
 
-	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	void ASystemCameraEventer::SavePreset()
 	{
-		if (It->GetFName() == ActorName)
+		if (!PresetData || PresetName.IsNone())
 		{
-			return *It;
+			return;
 		}
+		FGlobalCameraEventerPreset Preset;
+		
+		Preset.PresetName = PresetName;
+		// Camera
+		Preset.CameraState = TargetState;
+		Preset.ConnectTargetName = ConnectTarget.GetFName();
+		Preset.TransitionMode = TransitionMode;
+		// Path
+		Preset.CameraPathActorName = CameraPathActor.GetFName();
+		Preset.StartDistanceThreshold = StartDistanceThreshold;
+		Preset.PathOffset = PathOffset;
+		Preset.FollowSmoothing = FollowSmoothing;
+		Preset.bPathLoop = bPathLoop;
+		// Trigger
+		Preset.bRestoreOnExit = bRestoreOnExit;
+		Preset.RestorePresetName = RestorePresetName;
+		Preset.RestoreCameraState = RestoreTargetState;
+		Preset.RestoreConnectTargetName = RestoreConnectTarget.GetFName();
+		Preset.RestoreTransitionMode = RestoreTransitionMode;
+		// Restore Path
+		Preset.RestoreCameraPathActorName = RestoreCameraPathActor.GetFName();
+		Preset.RestoreStartDistanceThreshold = RestoreStartDistanceThreshold;
+		Preset.RestorePathOffset = RestorePathOffset;
+		Preset.RestoreFollowSmoothing = RestoreFollowSmoothing;
+		Preset.bRestorePathLoop = bRestorePathLoop;
+		// Trigger Settings
+		Preset.bFireOnlyOnce = bFireOnlyOnce;
+		Preset.ActivationDelay = ActivationDelay;
+		FGlobalCameraEventerPreset ExistingPreset;
+		const bool bExists = PresetData->FindPreset(PresetName, ExistingPreset);
+		if (bExists && !ConfirmOverwrite())
+		{
+			return;
+		}
+		PresetData->SavePreset(PresetName, Preset, bExists);
 	}
 
-	return nullptr;
-}
+	void ASystemCameraEventer::LoadPreset()
+	{
+		if (!PresetData || PresetName.IsNone())
+		{
+			return;
+		}
+		FGlobalCameraEventerPreset Preset;
+		if (!PresetData->FindPreset(PresetName, Preset))
+		{
+			return;
+		}
+		PresetName = Preset.PresetName;
+		// Camera
+		TargetState = Preset.CameraState;
+		ConnectTarget = FindActorByName(Preset.ConnectTargetName);
+		TransitionMode = Preset.TransitionMode;
+		// Path
+		CameraPathActor = FindActorByName(Preset.CameraPathActorName);
+		StartDistanceThreshold = Preset.StartDistanceThreshold;
+		PathOffset = Preset.PathOffset;
+		FollowSmoothing = Preset.FollowSmoothing;
+		bPathLoop = Preset.bPathLoop;
+		// Trigger
+		bRestoreOnExit = Preset.bRestoreOnExit;
+		RestorePresetName = Preset.RestorePresetName;
+		RestoreTargetState = Preset.RestoreCameraState;
+		RestoreConnectTarget = FindActorByName(Preset.RestoreConnectTargetName);
+		RestoreTransitionMode = Preset.RestoreTransitionMode;
+		// Restore Path
+		RestoreCameraPathActor = FindActorByName(Preset.RestoreCameraPathActorName);
+		RestoreStartDistanceThreshold = Preset.RestoreStartDistanceThreshold;
+		RestorePathOffset = Preset.RestorePathOffset;
+		RestoreFollowSmoothing = Preset.RestoreFollowSmoothing;
+		bRestorePathLoop = Preset.bRestorePathLoop;
+		// Trigger Settings
+		bFireOnlyOnce = Preset.bFireOnlyOnce;
+		ActivationDelay = Preset.ActivationDelay;
+	}
 
-//void ASystemCameraEventer::SavePreset()
-//{
-//	if (!PresetData || PresetName.IsNone())
-//	{
-//		return;
-//	}
-//
-//	FGameCameraEventerPreset NewPreset;
-//	NewPreset.PresetName = PresetName;
-//	NewPreset.CameraState = CameraState;
-//
-//	PresetData->Presets.Add(NewPreset);
-//
-//	PresetData->MarkPackageDirty();
-//}
-//
-//void ASystemCameraEventer::LoadPreset()
-//{
-//	if (!PresetData || PresetName.IsNone())
-//	{
-//		return;
-//	}
-//
-//	for (const FGameCameraEventerPreset& Preset : PresetData->Presets)
-//	{
-//		if (Preset.PresetName == PresetName)
-//		{
-//			CameraState = Preset.CameraState;
-//			return;
-//		}
-//	}
-//}
-//
-//void ASystemCameraEventer::DeletePreset()
-//{
-//	if (!PresetData || PresetName.IsNone())
-//	{
-//		return;
-//	}
-//
-//	for (int32 i = PresetData->Presets.Num() - 1; i >= 0; --i)
-//	{
-//		if (PresetData->Presets[i].PresetName == PresetName)
-//		{
-//			PresetData->Presets.RemoveAt(i);
-//			PresetData->MarkPackageDirty();
-//			return;
-//		}
-//	}
-//}
+	void ASystemCameraEventer::DeletePreset()
+	{
+		if (!PresetData || PresetName.IsNone())
+		{
+			return;
+		}
+		PresetData->DeletePreset(PresetName);
+	}
 
 #endif

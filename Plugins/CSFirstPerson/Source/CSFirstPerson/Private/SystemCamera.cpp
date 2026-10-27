@@ -182,10 +182,10 @@ void ASystemCamera::UpdatePositionState(float DeltaTime)
 	}
 	const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
 	CurrentState.Position = FMath::VInterpTo(CurrentState.Position, TargetState.Position, DeltaTime, Speed);
-	if (CurrentState.Position.Equals(TargetState.Position, 0.1f))
+	/*if (CurrentState.Position.Equals(TargetState.Position, 0.01f))
 	{
 		CurrentState.Position = TargetState.Position;
-	}
+	}*/
 }
 void ASystemCamera::UpdateRotationState(float DeltaTime)
 {
@@ -196,15 +196,17 @@ void ASystemCamera::UpdateRotationState(float DeltaTime)
 	}
 	if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Position.Equals(TargetState.Position, 0.1f))
 	{
-		CurrentState.Rotation = TargetState.Rotation;
+		//CurrentState.Rotation = TargetState.Rotation;
+		const float Speed = FMath::Max(CurrentState.RotationSpeed * 3.f, 20.f);
+		CurrentState.Rotation = FMath::RInterpTo(CurrentState.Rotation, TargetState.Rotation, DeltaTime, Speed);
 		return;
 	}
 	const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
 	CurrentState.Rotation = FMath::RInterpTo(CurrentState.Rotation, TargetState.Rotation, DeltaTime, Speed);
-	if (CurrentState.Rotation.Equals(TargetState.Rotation, 0.1f))
+	/*if (CurrentState.Rotation.Equals(TargetState.Rotation, 0.01f))
 	{
 		CurrentState.Rotation = TargetState.Rotation;
-	}
+	}*/
 }
 void ASystemCamera::UpdateCameraSettings(float DeltaTime)
 {
@@ -264,6 +266,15 @@ void ASystemCamera::UpdateControlSettings(float DeltaTime)
 }
 void ASystemCamera::UpdateCameraRotation(float LookX, float LookY)
 {
+	if (TargetState.bUseTargetRotation)
+	{
+		if (AActor* RotationTarget = GetRotationTarget())
+		{
+			TargetState.Rotation = RotationTarget->GetActorRotation();
+			TargetState.Rotation.Yaw += TargetState.LockOnRotation;
+		}
+		return;
+	}
 	if (CurrentState.ControlMode == EGlobalCameraControlMode::None) // || !(CurrentState.Rotation.Equals(TargetState.Rotation, 0.1f) && CurrentState.Position.Equals(TargetState.Position, 0.1f))
 	{
 		return;
@@ -305,9 +316,24 @@ void ASystemCamera::UpdateCameraTransform(float DeltaTime)
 			PlayerTarget->GetActorLocation()
 		);
 	}
-	if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Position.Equals(TargetState.Position, 0.1f))
+	if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Position.Equals(TargetState.Position, 3.f))
 	{
-		SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
+		
+		const float MoveSpeed = FMath::Max(CurrentState.MovementSpeed * 2.f, 40.f);
+		const float PositionTolerance = 5.0f;
+
+		FVector NewLocation = FMath::VInterpTo(
+			GetActorLocation(),
+			DesiredLocation,
+			DeltaTime,
+			MoveSpeed
+		);
+
+		if (FVector::DistSquared(NewLocation, DesiredLocation) <= FMath::Square(PositionTolerance))
+		{
+			NewLocation = DesiredLocation;
+		}
+		SetActorLocationAndRotation(NewLocation, DesiredRotation);
 	}
 	else
 	{
@@ -321,18 +347,25 @@ void ASystemCamera::UpdateCameraTransform(float DeltaTime)
 				GetActorLocation(),
 				DesiredLocation,
 				DeltaTime,
-				FMath::Max(CurrentState.MovementSpeed, 0.1f)
+				FMath::Max(CurrentState.MovementSpeed, 0.01f)
 			);
 			const bool bDirectMouseControl = !CurrentState.bUseTargetRotation && !CurrentState.bLookAtTarget;
-			const FRotator NewRotation = bDirectMouseControl
+			/*const FRotator NewRotation = bDirectMouseControl
 				? CurrentState.Rotation
 				: FMath::RInterpTo(
 					GetActorRotation(),
 					DesiredRotation,
 					DeltaTime,
 					FMath::Max(CurrentState.RotationSpeed, 0.1f)
+				);*/
+			const FRotator NewRotation = bDirectMouseControl
+				? CurrentState.Rotation
+				: FMath::RInterpConstantTo(
+					GetActorRotation(),
+					DesiredRotation,
+					DeltaTime,
+					FMath::Max(CurrentState.RotationSpeed, 0.01f) * 30.f
 				);
-			
 			
 			SetActorLocationAndRotation(NewLocation, NewRotation);
 		}

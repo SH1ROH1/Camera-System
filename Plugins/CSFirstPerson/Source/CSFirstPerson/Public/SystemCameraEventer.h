@@ -4,7 +4,7 @@
 #include "Engine/DataAsset.h"
 #include "Engine/TriggerVolume.h"
 #include "SystemCamera.h"
-//#include "SystemCameraPresetData.h"
+#include "GlobalCameraPresetData.h"
 #include "SystemCameraEventer.generated.h"
 
 class USplineComponent;
@@ -33,33 +33,33 @@ public:
 	// State | Presets
 	//==========================================================
 
-//	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State | Presets")
-//	FName PresetName;
-//
-//	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State | Presets")
-//	TObjectPtr<UGameCameraPresetData> PresetData = nullptr;
-//
-//
-//
-//#if WITH_EDITOR
-//
-//	UFUNCTION(CallInEditor, Category = "Presets Buttons")
-//	void SavePreset();
-//
-//	UFUNCTION(CallInEditor, Category = "Presets Buttons")
-//	void LoadPreset();
-//
-//	UFUNCTION(CallInEditor, Category = "Presets Buttons")
-//	void DeletePreset();
-//
-//#endif
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+	FName PresetName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+	TObjectPtr<UGlobalCameraPresetData> PresetData = nullptr;
+
+
+
+#if WITH_EDITOR
+
+	UFUNCTION(CallInEditor, Category = "Presets")
+	void SavePreset();
+
+	UFUNCTION(CallInEditor, Category = "Presets")
+	void LoadPreset();
+
+	UFUNCTION(CallInEditor, Category = "Presets")
+	void DeletePreset();
+
+#endif
 
 	//==========================================================
 	// State | Camera
 	//==========================================================
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State | Camera")
-	FGlobalCameraState CameraState;
+	FGlobalCameraState TargetState;
 
 
 
@@ -96,7 +96,7 @@ public:
 	bool bRestoreOnExit = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State | Restore", meta = (EditCondition = "bRestoreOnExit"))
-	FGlobalCameraState RestoreCameraState;
+	FGlobalCameraState RestoreTargetState;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State | Restore", meta = (EditCondition = "bRestoreOnExit"))
 	FName RestorePresetName;
