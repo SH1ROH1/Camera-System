@@ -197,8 +197,9 @@ void ASystemCamera::UpdateRotationState(float DeltaTime)
 	if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson && CurrentState.Position.Equals(TargetState.Position, 0.1f))
 	{
 		//CurrentState.Rotation = TargetState.Rotation;
-		const float Speed = FMath::Max(CurrentState.RotationSpeed * 3.f, 20.f);
-		CurrentState.Rotation = FMath::RInterpTo(CurrentState.Rotation, TargetState.Rotation, DeltaTime, Speed);
+		float *MaxSpeed = &TargetState.RotationSpeed; 
+		*MaxSpeed = FMath::FInterpConstantTo(*MaxSpeed, 100.f, DeltaTime * 2.5f, 25.f);
+		CurrentState.Rotation = FMath::RInterpTo(CurrentState.Rotation, TargetState.Rotation, DeltaTime, *MaxSpeed);
 		return;
 	}
 	const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
