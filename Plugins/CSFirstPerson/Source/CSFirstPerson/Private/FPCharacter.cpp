@@ -7,7 +7,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Components/InputComponent.h"
 // Camera
-#include "SystemCamera.h"
+#include "Camera/SystemCamera.h"
 
 
 AFPCharacter::AFPCharacter()
@@ -109,6 +109,7 @@ void AFPCharacter::UpdateCameraRotation(float deltaTime) const
 	if (!bUseMouseLook || !CameraActor)
 		return;
 	CameraActor->UpdateCameraRotation(LookX, LookY);
+
 }
 
 void AFPCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

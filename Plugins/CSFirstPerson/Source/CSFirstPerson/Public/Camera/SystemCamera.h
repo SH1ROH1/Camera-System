@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -16,6 +15,8 @@ class CSFIRSTPERSON_API ASystemCamera : public AActor
 
 private:
 	FVector FixedWorldPosition = FVector::ZeroVector;
+
+	float CurrentRotationSpeed = 1.f;
 
 	void SetTransitionMode(EGlobalCameraTransitionMode NewMode);
 	void UpdateBlend(float DeltaTime);
@@ -125,6 +126,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Camera|Target")
 	void SetTargetAimSettings(float NewDistance, float NewHeight, EGlobalCameraTransitionMode NewMode = EGlobalCameraTransitionMode::Smooth);
 
+	UFUNCTION(BlueprintCallable, Category = "Camera|Mouse")
+    void SetTargetInvertThirdPersonPitch(bool bInvert, EGlobalCameraTransitionMode NewMode = EGlobalCameraTransitionMode::Smooth);
+
 	UFUNCTION(BlueprintCallable, Category = "Camera")
 	void UpdateCameraRotation(float LookX, float LookY);
 
@@ -141,4 +145,6 @@ public:
 	AActor* GetConnectTarget() const { return ConnectTarget; }
 
 	AActor* GetTarget() const;
+
+	
 };

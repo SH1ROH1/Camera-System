@@ -91,6 +91,9 @@ struct FGlobalCameraState
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Control")
 	EGlobalCameraLookMode LookMode = EGlobalCameraLookMode::LookAtTarget;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Control")
+    bool bInvertThirdPersonPitch = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Control", meta = (ClampMin = "0.0"))
 	float MouseSensitivity = 2.f;
 
