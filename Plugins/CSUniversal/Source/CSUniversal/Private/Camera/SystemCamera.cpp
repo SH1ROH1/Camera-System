@@ -1,637 +1,720 @@
-// _________________________________________
-// includes
 #include "Camera/SystemCamera.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CameraStateComponent.h"
+#include "Camera/CameraTargetComponent.h"
+#include "Camera/CameraPositionComponent.h"
+#include "Camera/CameraCollisionComponent.h"
+#include "Camera/CameraRotationComponent.h"
+#include "Camera/CameraTransitionComponent.h"
+#include "Camera/FirstPersonCameraComponent.h"
+#include "Camera/OrbitCameraComponent.h"
 #include "Components/SceneComponent.h"
-#include "Kismet/KismetMathLibrary.h"
-// _________________________________________
-// Base
-ASystemCamera::ASystemCamera() {
-  PrimaryActorTick.bCanEverTick = true;
-  Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
-  SetRootComponent(Root);
-  CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
-  CameraComponent->SetupAttachment(Root);
+#include "GameFramework/Actor.h"
+
+ASystemCamera::ASystemCamera()
+{
+	PrimaryActorTick.bCanEverTick = true;
+
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	SetRootComponent(Root);
+
+	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+	CameraComponent->SetupAttachment(Root);
+
+	StateComponent = CreateDefaultSubobject<UCameraStateComponent>(TEXT("CameraState"));
+	TargetComponent = CreateDefaultSubobject<UCameraTargetComponent>(TEXT("CameraTarget"));
+	PositionComponent = CreateDefaultSubobject<UCameraPositionComponent>(TEXT("CameraPosition"));
+	CollisionComponent = CreateDefaultSubobject<UCameraCollisionComponent>(TEXT("CameraCollision"));
+	RotationComponent = CreateDefaultSubobject<UCameraRotationComponent>(TEXT("CameraRotation"));
+	TransitionComponent = CreateDefaultSubobject<UCameraTransitionComponent>(TEXT("CameraTransition"));
+	FirstPersonComponent = CreateDefaultSubobject<UFirstPersonCameraComponent>(TEXT("FirstPersonCamera"));
+	OrbitComponent = CreateDefaultSubobject<UOrbitCameraComponent>(TEXT("OrbitCamera"));
 }
-void ASystemCamera::BeginPlay() {
-  Super::BeginPlay();
-  if (!PlayerTarget) {
-    PlayerTarget = GetOwner();
-  }
-  TargetState = CurrentState;
-  FixedWorldPosition = GetWorldPositionFromState(CurrentState);
-  if (CameraComponent) {
-    CameraComponent->SetRelativeLocation(FVector::ZeroVector);
-    CameraComponent->SetRelativeRotation(FRotator::ZeroRotator);
-    CameraComponent->SetFieldOfView(CurrentState.FieldOfView);
-  }
+
+void ASystemCamera::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (TargetComponent)
+	{
+		if (IsValid(PlayerTarget))
+		{
+			TargetComponent->SetPlayerTarget(PlayerTarget);
+		}
+		else
+		{
+			PlayerTarget = TargetComponent->GetPlayerTarget();
+		}
+
+		TargetComponent->SetConnectTarget(ConnectTarget);
+	}
+
+	if (StateComponent)
+	{
+		StateComponent->CurrentState = CurrentState;
+		StateComponent->TargetState = CurrentState;
+		StateComponent->TransitionMode = TransitionMode;
+	}
+
+	if (PositionComponent)
+	{
+		PositionComponent->InitializePosition(
+			CurrentState,
+			GetPositionTarget(CurrentState.Position.PositionMode)
+		);
+	}
+
+	if (CameraComponent)
+	{
+		CameraComponent->SetRelativeLocation(FVector::ZeroVector);
+		CameraComponent->SetRelativeRotation(FRotator::ZeroRotator);
+		CameraComponent->SetFieldOfView(CurrentState.Lens.FieldOfView);
+	}
 }
-void ASystemCamera::Tick(float DeltaTime) {
-  Super::Tick(DeltaTime);
-  UpdateBlend(DeltaTime);
-  UpdateCameraTransform(DeltaTime);
+
+void ASystemCamera::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	PushStateToComponents();
+	UpdateBlend(DeltaTime);
+	UpdateCameraTransform(DeltaTime);
+	PullStateFromComponents();
 }
-// _________________________________________
-// Target state setters
-void ASystemCamera::SetTransitionMode(EGlobalCameraTransitionMode NewMode) {
-  TransitionMode = NewMode;
+
+void ASystemCamera::PushStateToComponents()
+{
+	if (!StateComponent)
+	{
+		return;
+	}
+
+	StateComponent->CurrentState = CurrentState;
+	StateComponent->TargetState = TargetState;
+	StateComponent->TransitionMode = TransitionMode;
+}
+
+void ASystemCamera::PullStateFromComponents()
+{
+	if (!StateComponent)
+	{
+		return;
+	}
+
+	CurrentState = StateComponent->CurrentState;
+	TargetState = StateComponent->TargetState;
+	TransitionMode = StateComponent->TransitionMode;
+}
+
+void ASystemCamera::SetTransitionMode(EGlobalCameraTransitionMode NewMode)
+{
+	TransitionMode = NewMode;
+
+	if (StateComponent)
+	{
+		StateComponent->SetTransitionMode(NewMode);
+	}
 }
 
 void ASystemCamera::SetCameraState(
-    const FGlobalCameraState &NewState,
-    EGlobalCameraTransitionMode NewTransitionMode) {
-  const bool bWasLookingAtTarget =
-      TargetState.bLookAtTarget && !NewState.bLookAtTarget;
-  const bool bSameControlMode =
-      CurrentState.ControlMode == NewState.ControlMode;
+	const FGlobalCameraState& NewState,
+	EGlobalCameraTransitionMode NewTransitionMode)
+{
+	if (!StateComponent)
+	{
+		return;
+	}
+	PushStateToComponents();
+	StateComponent->SetTargetState(NewState, NewTransitionMode);
+	PullStateFromComponents();
 
-  FGlobalCameraState StateToApply = NewState;
-
-  if (!bSameControlMode) {
-    const FRotator CameraRotation = GetActorRotation();
-    StateToApply.Rotation = CameraRotation;
-    StateToApply.OrbitYaw = FRotator::NormalizeAxis(CameraRotation.Yaw);
-    StateToApply.OrbitPitch = FMath::Clamp(
-        CameraRotation.Pitch, StateToApply.MinPitch, StateToApply.MaxPitch);
-  } else if (NewState.ControlMode == EGlobalCameraControlMode::ThirdPerson) {
-    StateToApply.OrbitYaw = TargetState.OrbitYaw;
-    StateToApply.OrbitPitch = TargetState.OrbitPitch;
-  }
-
-  // Сохраняем фактический поворот камеры при выходе из LookAt.
-  if (bWasLookingAtTarget &&
-      NewState.ControlMode == EGlobalCameraControlMode::FirstPerson) {
-    const FRotator CameraRotation = GetActorRotation();
-    StateToApply.Rotation = CameraRotation;
-    StateToApply.OrbitYaw = FRotator::NormalizeAxis(CameraRotation.Yaw);
-    StateToApply.OrbitPitch = FMath::Clamp(
-        CameraRotation.Pitch, StateToApply.MinPitch, StateToApply.MaxPitch);
-  }
-
-  TargetState = StateToApply;
-  CurrentState.bInvertThirdPersonPitch = StateToApply.bInvertThirdPersonPitch;
-
-  SetTransitionMode(NewTransitionMode);
-
-  if (TargetState.FollowTarget == EGlobalCameraFollowTarget::None) {
-    FixedWorldPosition = GetWorldPositionFromState(TargetState);
-  }
+	if (TargetState.Target.FollowTarget == EGlobalCameraFollowTarget::None && PositionComponent)
+	{
+		PositionComponent->SetFixedWorldPosition(GetWorldPositionFromState(TargetState));
+	}
 }
 
-void ASystemCamera::SetTargetPosition(FVector NewPosition,
-                                      EGlobalCameraTransitionMode NewMode) {
-  TargetState.Position = NewPosition;
-  SetTransitionMode(NewMode);
-  if (TargetState.FollowTarget == EGlobalCameraFollowTarget::None) {
-    FixedWorldPosition = GetWorldPositionFromState(TargetState);
-  }
+void ASystemCamera::UpdateBlend(float DeltaTime)
+{
+	if (!StateComponent || !TransitionComponent)
+	{
+		return;
+	}
+
+	StateComponent->UpdateDiscreteSettings();
+
+	TransitionComponent->UpdateTransition(
+		StateComponent->CurrentState,
+		StateComponent->TargetState,
+		StateComponent->TransitionMode,
+		DeltaTime
+	);
 }
+
+void ASystemCamera::UpdateDiscreteSettings()
+{
+	if (StateComponent)
+	{
+		StateComponent->UpdateDiscreteSettings();
+	}
+}
+
+void ASystemCamera::SetTargetPosition(FVector NewPosition, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Position.Position = NewPosition;
+	SetTransitionMode(NewMode);
+
+	if (TargetState.Target.FollowTarget == EGlobalCameraFollowTarget::None && PositionComponent)
+	{
+		PositionComponent->SetFixedWorldPosition(GetWorldPositionFromState(TargetState));
+	}
+
+	PushStateToComponents();
+}
+
 void ASystemCamera::SetTargetPositionMode(
-    EGlobalCameraPositionMode NewMode, EGlobalCameraTransitionMode Transition) {
-  TargetState.PositionMode = NewMode;
-  SetTransitionMode(Transition);
-  if (TargetState.FollowTarget == EGlobalCameraFollowTarget::None) {
-    FixedWorldPosition = GetWorldPositionFromState(TargetState);
-  }
-}
-void ASystemCamera::SetTargetFollow(EGlobalCameraFollowTarget NewTarget,
-                                    EGlobalCameraTransitionMode NewMode) {
-  TargetState.FollowTarget = NewTarget;
-  SetTransitionMode(NewMode);
-  if (NewTarget == EGlobalCameraFollowTarget::None) {
-    FixedWorldPosition = GetWorldPositionFromState(TargetState);
-  }
-}
-void ASystemCamera::SetTargetCollision(bool bEnabled,
-                                       EGlobalCameraTransitionMode NewMode) {
-  TargetState.bUseCollision = bEnabled;
-  SetTransitionMode(NewMode);
-}
-void ASystemCamera::SetTargetRotation(FRotator NewRotation,
-                                      EGlobalCameraTransitionMode NewMode) {
-  TargetState.Rotation = NewRotation;
+	EGlobalCameraPositionMode NewMode,
+	EGlobalCameraTransitionMode Transition)
+{
+	TargetState.Position.PositionMode = NewMode;
+	SetTransitionMode(Transition);
 
-  if (TargetState.ControlMode != EGlobalCameraControlMode::ThirdPerson) {
-    TargetState.OrbitYaw = FRotator::NormalizeAxis(NewRotation.Yaw);
+	if (TargetState.Target.FollowTarget == EGlobalCameraFollowTarget::None && PositionComponent)
+	{
+		PositionComponent->SetFixedWorldPosition(GetWorldPositionFromState(TargetState));
+	}
 
-    TargetState.OrbitPitch = FMath::Clamp(
-        NewRotation.Pitch, TargetState.MinPitch, TargetState.MaxPitch);
-  }
-
-  SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
+
+void ASystemCamera::SetTargetFollow(
+	EGlobalCameraFollowTarget NewTarget,
+	EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Target.FollowTarget = NewTarget;
+	SetTransitionMode(NewMode);
+
+	if (NewTarget == EGlobalCameraFollowTarget::None && PositionComponent)
+	{
+		PositionComponent->SetFixedWorldPosition(GetWorldPositionFromState(TargetState));
+	}
+
+	PushStateToComponents();
+}
+
+void ASystemCamera::SetTargetCollision(bool bEnabled, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Position.bUseCollision = bEnabled;
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
+}
+
+void ASystemCamera::SetTargetRotation(FRotator NewRotation, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Rotation.Rotation = NewRotation;
+
+	if (TargetState.Control.ControlMode != EGlobalCameraControlMode::ThirdPerson)
+	{
+		TargetState.Orbit.OrbitYaw = FRotator::NormalizeAxis(NewRotation.Yaw);
+		TargetState.Orbit.OrbitPitch = FMath::Clamp(
+			NewRotation.Pitch,
+			TargetState.Orbit.MinPitch,
+			TargetState.Orbit.MaxPitch
+		);
+	}
+
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
+}
+
 void ASystemCamera::SetTargetRotationSettings(
-    bool bUseTargetRotation, bool bUsePathRotation, float NewLockOnRotation,
-    EGlobalCameraTransitionMode NewMode) {
-  const bool bWasUsingTargetRotation = TargetState.bUseTargetRotation;
+	bool bUseTargetRotation,
+	bool bUsePathRotation,
+	float NewLockOnRotation,
+	EGlobalCameraTransitionMode NewMode)
+{
+	const bool bWasUsingTargetRotation = TargetState.Rotation.bUseTargetRotation;
 
-  // Переход от поворота актора к ручному управлению камерой.
-  if (bWasUsingTargetRotation && !bUseTargetRotation &&
-      TargetState.ControlMode != EGlobalCameraControlMode::ThirdPerson) {
-    const FRotator CameraRotation = GetActorRotation();
+	if (
+		bWasUsingTargetRotation &&
+		!bUseTargetRotation &&
+		TargetState.Control.ControlMode != EGlobalCameraControlMode::ThirdPerson
+	)
+	{
+		const FRotator CameraRotation = GetActorRotation();
 
-    CurrentState.Rotation = CameraRotation;
-    TargetState.Rotation = CameraRotation;
+		CurrentState.Rotation.Rotation = CameraRotation;
+		TargetState.Rotation.Rotation = CameraRotation;
 
-    CurrentState.OrbitYaw = FRotator::NormalizeAxis(CameraRotation.Yaw);
+		CurrentState.Orbit.OrbitYaw = FRotator::NormalizeAxis(CameraRotation.Yaw);
+		CurrentState.Orbit.OrbitPitch = FMath::Clamp(
+			CameraRotation.Pitch,
+			CurrentState.Orbit.MinPitch,
+			CurrentState.Orbit.MaxPitch
+		);
 
-    CurrentState.OrbitPitch = FMath::Clamp(
-        CameraRotation.Pitch, CurrentState.MinPitch, CurrentState.MaxPitch);
+		TargetState.Orbit.OrbitYaw = CurrentState.Orbit.OrbitYaw;
+		TargetState.Orbit.OrbitPitch = CurrentState.Orbit.OrbitPitch;
+	}
 
-    TargetState.OrbitYaw = CurrentState.OrbitYaw;
-    TargetState.OrbitPitch = CurrentState.OrbitPitch;
-  }
+	TargetState.Rotation.bUseTargetRotation = bUseTargetRotation;
+	TargetState.Rotation.bUsePathRotation = bUsePathRotation;
+	TargetState.Rotation.LockOnRotation = NewLockOnRotation;
 
-  TargetState.bUseTargetRotation = bUseTargetRotation;
-  TargetState.bUsePathRotation = bUsePathRotation;
-  TargetState.LockOnRotation = NewLockOnRotation;
-
-  SetTransitionMode(NewMode);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetLookAt(bool bEnabled,
-                                    EGlobalCameraLookMode NewLookMode,
-                                    EGlobalCameraTransitionMode NewMode) {
-  const bool bWasLookingAtTarget = TargetState.bLookAtTarget;
 
-  if (bWasLookingAtTarget && !bEnabled &&
-      TargetState.ControlMode != EGlobalCameraControlMode::ThirdPerson) {
-    const FRotator CameraRotation = GetActorRotation();
+void ASystemCamera::SetTargetLookAt(
+	bool bEnabled,
+	EGlobalCameraLookMode NewLookMode,
+	EGlobalCameraTransitionMode NewMode)
+{
+	const bool bWasLookingAtTarget = TargetState.Aim.bLookAtTarget;
 
-    CurrentState.Rotation = CameraRotation;
-    TargetState.Rotation = CameraRotation;
+	if (
+		bWasLookingAtTarget &&
+		!bEnabled &&
+		TargetState.Control.ControlMode != EGlobalCameraControlMode::ThirdPerson
+	)
+	{
+		const FRotator CameraRotation = GetActorRotation();
 
-    CurrentState.OrbitYaw = FRotator::NormalizeAxis(CameraRotation.Yaw);
+		CurrentState.Rotation.Rotation = CameraRotation;
+		TargetState.Rotation.Rotation = CameraRotation;
 
-    CurrentState.OrbitPitch = FMath::Clamp(
-        CameraRotation.Pitch, CurrentState.MinPitch, CurrentState.MaxPitch);
+		CurrentState.Orbit.OrbitYaw = FRotator::NormalizeAxis(CameraRotation.Yaw);
+		CurrentState.Orbit.OrbitPitch = FMath::Clamp(
+			CameraRotation.Pitch,
+			CurrentState.Orbit.MinPitch,
+			CurrentState.Orbit.MaxPitch
+		);
 
-    TargetState.OrbitYaw = CurrentState.OrbitYaw;
-    TargetState.OrbitPitch = CurrentState.OrbitPitch;
-  }
+		TargetState.Orbit.OrbitYaw = CurrentState.Orbit.OrbitYaw;
+		TargetState.Orbit.OrbitPitch = CurrentState.Orbit.OrbitPitch;
+	}
 
-  TargetState.bLookAtTarget = bEnabled;
-  TargetState.LookMode = NewLookMode;
+	TargetState.Aim.bLookAtTarget = bEnabled;
+	TargetState.Aim.LookMode = NewLookMode;
 
-  SetTransitionMode(NewMode);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetFieldOfView(float NewFieldOfView,
-                                         EGlobalCameraTransitionMode NewMode) {
-  TargetState.FieldOfView = FMath::Clamp(NewFieldOfView, 5.f, 170.f);
-  SetTransitionMode(NewMode);
+
+void ASystemCamera::SetTargetFieldOfView(float NewFieldOfView, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Lens.FieldOfView = FMath::Clamp(NewFieldOfView, 5.f, 170.f);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetMovementSpeed(
-    float NewSpeed, EGlobalCameraTransitionMode NewMode) {
-  TargetState.MovementSpeed = FMath::Max(NewSpeed, 0.01f);
-  SetTransitionMode(NewMode);
+
+void ASystemCamera::SetTargetMovementSpeed(float NewSpeed, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Movement.MovementSpeed = FMath::Max(NewSpeed, 0.01f);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetRotationSpeed(
-    float NewSpeed, EGlobalCameraTransitionMode NewMode) {
-  TargetState.RotationSpeed = FMath::Max(NewSpeed, 0.01f);
-  SetTransitionMode(NewMode);
+
+void ASystemCamera::SetTargetRotationSpeed(float NewSpeed, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Movement.RotationSpeed = FMath::Max(NewSpeed, 0.01f);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetBlendSpeed(float NewSpeed,
-                                        EGlobalCameraTransitionMode NewMode) {
-  TargetState.BlendSpeed = FMath::Max(NewSpeed, 0.01f);
-  SetTransitionMode(NewMode);
+
+void ASystemCamera::SetTargetBlendSpeed(float NewSpeed, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Movement.BlendSpeed = FMath::Max(NewSpeed, 0.01f);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
+
 void ASystemCamera::SetTargetControlMode(
-    EGlobalCameraControlMode NewMode, EGlobalCameraTransitionMode Transition) {
-  TargetState.ControlMode = NewMode;
-  SetTransitionMode(Transition);
+	EGlobalCameraControlMode NewMode,
+	EGlobalCameraTransitionMode Transition)
+{
+	TargetState.Control.ControlMode = NewMode;
+	SetTransitionMode(Transition);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetMouseSensitivity(
-    float NewSensitivity, EGlobalCameraTransitionMode NewMode) {
-  TargetState.MouseSensitivity = FMath::Max(NewSensitivity, 0.f);
-  SetTransitionMode(NewMode);
+
+void ASystemCamera::SetTargetMouseSensitivity(float NewSensitivity, EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Control.MouseSensitivity = FMath::Max(NewSensitivity, 0.f);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
+
 void ASystemCamera::SetTargetOrbitSettings(
-    float NewYaw, float NewPitch, float NewDistance, float NewMinPitch,
-    float NewMaxPitch, EGlobalCameraTransitionMode NewMode) {
-  TargetState.OrbitYaw = FRotator::NormalizeAxis(NewYaw);
-  TargetState.MinPitch = FMath::Clamp(NewMinPitch, -89.f, 89.f);
-  TargetState.MaxPitch = FMath::Clamp(NewMaxPitch, TargetState.MinPitch, 89.f);
-  TargetState.OrbitPitch =
-      FMath::Clamp(NewPitch, TargetState.MinPitch, TargetState.MaxPitch);
-  TargetState.OrbitDistance = FMath::Max(NewDistance, 1.f);
-  SetTransitionMode(NewMode);
+	float NewYaw,
+	float NewPitch,
+	float NewDistance,
+	float NewMinPitch,
+	float NewMaxPitch,
+	EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Orbit.OrbitYaw = FRotator::NormalizeAxis(NewYaw);
+	TargetState.Orbit.MinPitch = FMath::Clamp(NewMinPitch, -89.f, 89.f);
+	TargetState.Orbit.MaxPitch = FMath::Clamp(NewMaxPitch, TargetState.Orbit.MinPitch, 89.f);
+	TargetState.Orbit.OrbitPitch = FMath::Clamp(
+		NewPitch,
+		TargetState.Orbit.MinPitch,
+		TargetState.Orbit.MaxPitch
+	);
+	TargetState.Orbit.OrbitDistance = FMath::Max(NewDistance, 1.f);
+
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
-void ASystemCamera::SetTargetAimSettings(float NewDistance, float NewHeight,
-                                         EGlobalCameraTransitionMode NewMode) {
-  TargetState.AimDistance = FMath::Max(NewDistance, 0.f);
-  TargetState.AimHeight = NewHeight;
-  SetTransitionMode(NewMode);
+
+void ASystemCamera::SetTargetAimSettings(
+	float NewDistance,
+	float NewHeight,
+	EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Aim.AimDistance = FMath::Max(NewDistance, 0.f);
+	TargetState.Aim.AimHeight = NewHeight;
+
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
+
 void ASystemCamera::SetTargetInvertThirdPersonPitch(
-    bool bInvert, EGlobalCameraTransitionMode NewMode) {
-  TargetState.bInvertThirdPersonPitch = bInvert;
-  CurrentState.bInvertThirdPersonPitch = bInvert;
-  SetTransitionMode(NewMode);
-}
-void ASystemCamera::SetConnectTarget(AActor *NewTarget) {
-  ConnectTarget = NewTarget;
-}
-// _________________________________________
-// Update functions
-void ASystemCamera::UpdateBlend(float DeltaTime) {
-  UpdateDiscreteSettings();
-  UpdatePositionState(DeltaTime);
-  UpdateRotationState(DeltaTime);
-  UpdateCameraSettings(DeltaTime);
-  UpdateControlSettings(DeltaTime);
-}
-void ASystemCamera::UpdateDiscreteSettings() {
-  CurrentState.PositionMode = TargetState.PositionMode;
-  CurrentState.FollowTarget = TargetState.FollowTarget;
-  CurrentState.bUseCollision = TargetState.bUseCollision;
-  CurrentState.bUseTargetRotation = TargetState.bUseTargetRotation;
-  CurrentState.bUsePathRotation = TargetState.bUsePathRotation;
-  CurrentState.bLookAtTarget = TargetState.bLookAtTarget;
-  CurrentState.ControlMode = TargetState.ControlMode;
-  CurrentState.LookMode = TargetState.LookMode;
-  CurrentState.bInvertThirdPersonPitch = TargetState.bInvertThirdPersonPitch;
-}
-void ASystemCamera::UpdatePositionState(float DeltaTime) {
-  if (TransitionMode == EGlobalCameraTransitionMode::Instant) {
-    CurrentState.Position = TargetState.Position;
-    return;
-  }
-  const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
-  CurrentState.Position = FMath::VInterpTo(
-      CurrentState.Position, TargetState.Position, DeltaTime, Speed);
-  /*if (CurrentState.Position.Equals(TargetState.Position, 0.01f))
-  {
-          CurrentState.Position = TargetState.Position;
-  }*/
-}
-void ASystemCamera::UpdateRotationState(float DeltaTime) {
-  if (TransitionMode == EGlobalCameraTransitionMode::Instant) {
-    CurrentRotationSpeed = 0.f;
-    CurrentState.Rotation = TargetState.Rotation;
-    return;
-  }
+	bool bInvert,
+	EGlobalCameraTransitionMode NewMode)
+{
+	TargetState.Orbit.bInvertThirdPersonPitch = bInvert;
+	CurrentState.Orbit.bInvertThirdPersonPitch = bInvert;
 
-  const bool bFirstPersonReady =
-      CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson &&
-      CurrentState.Position.Equals(TargetState.Position, 0.1f);
-
-  if (bFirstPersonReady) {
-    const float MaxRotationSpeed = 100.f;
-    const float RotationAcceleration = 250.f;
-
-    CurrentRotationSpeed =
-        FMath::FInterpConstantTo(CurrentRotationSpeed, MaxRotationSpeed,
-                                 DeltaTime, RotationAcceleration);
-
-    CurrentState.Rotation =
-        FMath::RInterpTo(CurrentState.Rotation, TargetState.Rotation, DeltaTime,
-                         FMath::Max(CurrentRotationSpeed, 0.01f));
-    return;
-  }
-
-  CurrentRotationSpeed = 0.f;
-
-  const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
-
-  CurrentState.Rotation = FMath::RInterpTo(
-      CurrentState.Rotation, TargetState.Rotation, DeltaTime, Speed);
-}
-void ASystemCamera::UpdateCameraSettings(float DeltaTime) {
-  const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
-  auto UpdateFloat = [this, DeltaTime, Speed](float &Current, float Target) {
-    if (TransitionMode == EGlobalCameraTransitionMode::Instant) {
-      Current = Target;
-      return;
-    }
-    Current = FMath::FInterpTo(Current, Target, DeltaTime, Speed);
-    if (FMath::IsNearlyEqual(Current, Target, 0.01f)) {
-      Current = Target;
-    }
-  };
-  UpdateFloat(CurrentState.MovementSpeed, TargetState.MovementSpeed);
-  UpdateFloat(CurrentState.RotationSpeed, TargetState.RotationSpeed);
-  UpdateFloat(CurrentState.FieldOfView, TargetState.FieldOfView);
-  UpdateFloat(CurrentState.BlendSpeed, TargetState.BlendSpeed);
-}
-void ASystemCamera::UpdateControlSettings(float DeltaTime) {
-  const float Speed = FMath::Max(CurrentState.BlendSpeed, 0.01f);
-  auto UpdateFloat = [this, DeltaTime, Speed](float &Current, float Target) {
-    if (Current == Target) {
-      return;
-    }
-    if (TransitionMode == EGlobalCameraTransitionMode::Instant) {
-      Current = Target;
-      return;
-    }
-    Current = FMath::FInterpTo(Current, Target, DeltaTime, Speed);
-    if (FMath::IsNearlyEqual(Current, Target, 0.01f)) {
-      Current = Target;
-    }
-  };
-
-  UpdateFloat(CurrentState.MouseSensitivity, TargetState.MouseSensitivity);
-
-  // Для третьего лица орбита изменяется мгновенно.
-  // Это обеспечивает мгновенное реагирование камеры на мышь.
-  if (CurrentState.ControlMode == EGlobalCameraControlMode::ThirdPerson) {
-    CurrentState.OrbitYaw = TargetState.OrbitYaw;
-    CurrentState.OrbitPitch = TargetState.OrbitPitch;
-  } else {
-    // Для первого лица орбита интерполируется плавно.
-    UpdateFloat(CurrentState.OrbitYaw, TargetState.OrbitYaw);
-    UpdateFloat(CurrentState.OrbitPitch, TargetState.OrbitPitch);
-  }
-
-  UpdateFloat(CurrentState.MinPitch, TargetState.MinPitch);
-  UpdateFloat(CurrentState.MaxPitch, TargetState.MaxPitch);
-  UpdateFloat(CurrentState.OrbitDistance, TargetState.OrbitDistance);
-  UpdateFloat(CurrentState.AimDistance, TargetState.AimDistance);
-  UpdateFloat(CurrentState.AimHeight, TargetState.AimHeight);
-  UpdateFloat(CurrentState.LockOnRotation, TargetState.LockOnRotation);
+	SetTransitionMode(NewMode);
+	PushStateToComponents();
 }
 
-void ASystemCamera::UpdateCameraRotation(float LookX, float LookY) {
-  if (TargetState.ControlMode == EGlobalCameraControlMode::None ||
-      TargetState.bUseTargetRotation ||
-      (TargetState.ControlMode == EGlobalCameraControlMode::ThirdPerson &&
-       TargetState.bLookAtTarget && IsValid(ConnectTarget)) ||
-      (FMath::IsNearlyZero(LookX) && FMath::IsNearlyZero(LookY))) {
-    return;
-  }
+void ASystemCamera::UpdateCameraRotation(float LookX, float LookY)
+{
+	if (!StateComponent || !TargetComponent)
+	{
+		return;
+	}
 
-  if (TargetState.ControlMode == EGlobalCameraControlMode::ThirdPerson) {
-    TargetState.OrbitYaw = FRotator::NormalizeAxis(
-        TargetState.OrbitYaw + LookX * TargetState.MouseSensitivity);
+	PushStateToComponents();
 
-    const float VerticalDirection =
-        CurrentState.bInvertThirdPersonPitch ? -1.f : 1.f;
+	FGlobalCameraState& Current = StateComponent->CurrentState;
+	FGlobalCameraState& Target = StateComponent->TargetState;
 
-    TargetState.OrbitPitch =
-        FMath::Clamp(TargetState.OrbitPitch + VerticalDirection * LookY *
-                                                  TargetState.MouseSensitivity,
-                     TargetState.MinPitch, TargetState.MaxPitch);
-    return;
-  }
+	if (
+		Target.Control.ControlMode == EGlobalCameraControlMode::None ||
+		Target.Rotation.bUseTargetRotation ||
+		(
+			Target.Control.ControlMode == EGlobalCameraControlMode::ThirdPerson &&
+			Target.Aim.bLookAtTarget &&
+			IsValid(TargetComponent->GetConnectTarget())
+		) ||
+		(FMath::IsNearlyZero(LookX) && FMath::IsNearlyZero(LookY))
+	)
+	{
+		return;
+	}
 
-  if (TargetState.bLookAtTarget) {
-    return;
-  }
-
-  TargetState.OrbitYaw = FRotator::NormalizeAxis(
-      TargetState.OrbitYaw + LookX * TargetState.MouseSensitivity);
-
-  TargetState.OrbitPitch = FMath::Clamp(
-      TargetState.OrbitPitch + LookY * TargetState.MouseSensitivity,
-      TargetState.MinPitch, TargetState.MaxPitch);
-
-  TargetState.Rotation.Yaw = TargetState.OrbitYaw;
-  TargetState.Rotation.Pitch = TargetState.OrbitPitch;
+	if (Target.Control.ControlMode == EGlobalCameraControlMode::ThirdPerson)
+	{
+		if (OrbitComponent)
+		{
+			OrbitComponent->UpdateRotationInput(
+				Target,
+				Current,
+				TargetComponent->GetConnectTarget(),
+				LookX,
+				LookY
+			);
+		}
+	}
+	else if (Target.Control.ControlMode == EGlobalCameraControlMode::FirstPerson)
+	{
+		if (FirstPersonComponent)
+		{
+			FirstPersonComponent->UpdateRotationInput(Target, LookX, LookY);
+		}
+	}
+	PullStateFromComponents();
 }
 
-void ASystemCamera::UpdateCameraTransform(float DeltaTime) {
-  const FVector DesiredLocation = CalculateDesiredLocation();
-  FRotator DesiredRotation = CurrentState.Rotation;
-  const bool bUseTargetRotationSpeed =
-      CurrentState.bLookAtTarget || CurrentState.bUseTargetRotation;
+void ASystemCamera::UpdateCameraTransform(float DeltaTime)
+{
+	if (
+		!StateComponent ||
+		!TargetComponent ||
+		!PositionComponent ||
+		!RotationComponent
+	)
+	{
+		return;
+	}
 
-  const float RotationSpeed = bUseTargetRotationSpeed
-                                  ? FMath::Max(TargetState.RotationSpeed, 2.f)
-                                  : CurrentState.RotationSpeed;
-  if (CurrentState.bUseTargetRotation) {
-    if (AActor *RotationTarget = GetRotationTarget()) {
-      DesiredRotation = RotationTarget->GetActorRotation();
-      DesiredRotation.Yaw += CurrentState.LockOnRotation;
-    }
+	FGlobalCameraState& Current = StateComponent->CurrentState;
+	FGlobalCameraState& Target = StateComponent->TargetState;
 
-  } else if (CurrentState.bLookAtTarget) {
-    FVector LookAtLocation;
-    bool bHasLookAtLocation = false;
+	AActor* FollowTarget = TargetComponent->GetFollowTarget(Current.Target.FollowTarget);
+	AActor* Player = TargetComponent->GetPlayerTarget();
+	AActor* Connect = TargetComponent->GetConnectTarget();
 
-    if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson &&
-        IsValid(ConnectTarget)) {
-      LookAtLocation = ConnectTarget->GetActorLocation() +
-                       FVector::UpVector * CurrentState.AimHeight;
-      bHasLookAtLocation = true;
-    } else if (CurrentState.ControlMode ==
-                   EGlobalCameraControlMode::ThirdPerson &&
-               IsValid(PlayerTarget) && IsValid(ConnectTarget)) {
-      LookAtLocation = (PlayerTarget->GetActorLocation() +
-                        ConnectTarget->GetActorLocation()) *
-                           0.5f +
-                       FVector::UpVector * CurrentState.AimHeight;
-      bHasLookAtLocation = true;
-    } else {
-      AActor *LookAtTarget = GetFollowTarget();
+	FVector DesiredLocation = PositionComponent->GetFixedWorldPosition();
+	AActor* CollisionTarget = FollowTarget;
+	FVector CollisionOrigin = GetActorLocation();
 
-      if (!IsValid(LookAtTarget)) {
-        LookAtTarget = PlayerTarget;
-      }
+	if (Current.Target.FollowTarget != EGlobalCameraFollowTarget::None)
+	{
+		bool bPositionCalculated = false;
 
-      if (IsValid(LookAtTarget)) {
-        if (CurrentState.LookMode == EGlobalCameraLookMode::LookAtTarget) {
-          LookAtLocation = LookAtTarget->GetActorLocation() +
-                           FVector::UpVector * CurrentState.AimHeight;
-        } else {
-          const FVector TargetLocation = LookAtTarget->GetActorLocation();
-          const FVector TargetRight = LookAtTarget->GetActorRightVector();
+		if (Current.Control.ControlMode == EGlobalCameraControlMode::FirstPerson && FirstPersonComponent)
+		{
+			bPositionCalculated = FirstPersonComponent->CalculateDesiredLocation(
+				Current,
+				FollowTarget,
+				DesiredLocation
+			);
 
-          const float ShoulderOffset =
-              FMath::Clamp(CurrentState.AimDistance * 0.05f, 10.f, 100.f);
+			if (IsValid(FollowTarget))
+			{
+				CollisionOrigin = FollowTarget->GetActorLocation();
+			}
+		}
+		else if (Current.Control.ControlMode == EGlobalCameraControlMode::ThirdPerson && OrbitComponent)
+		{
+			bPositionCalculated = OrbitComponent->CalculateDesiredLocation(
+				Current,
+				FollowTarget,
+				Player,
+				Connect,
+				DesiredLocation
+			);
 
-          LookAtLocation = TargetLocation + TargetRight * ShoulderOffset +
-                           FVector::UpVector * CurrentState.AimHeight;
-        }
+			AActor* OrbitTarget = FollowTarget;
 
-        bHasLookAtLocation = true;
-      }
-    }
+			if (
+				Current.Target.FollowTarget == EGlobalCameraFollowTarget::ConnectTarget &&
+				IsValid(Player)
+			)
+			{
+				OrbitTarget = Player;
+			}
 
-    if (bHasLookAtLocation) {
-      DesiredRotation = UKismetMathLibrary::FindLookAtRotation(DesiredLocation,
-                                                               LookAtLocation);
+			if (IsValid(OrbitTarget))
+			{
+				CollisionTarget = OrbitTarget;
+				CollisionOrigin = OrbitTarget->GetActorLocation()
+					+ FVector::UpVector * Current.Aim.AimHeight;
+			}
+		}
+		else if (IsValid(FollowTarget))
+		{
+			DesiredLocation = FollowTarget->GetActorLocation() + Current.Position.Position;
+			bPositionCalculated = true;
+			CollisionOrigin = FollowTarget->GetActorLocation();
+		}
 
-      CurrentState.Rotation = DesiredRotation;
-      TargetState.Rotation = DesiredRotation;
-    }
-  }
+		if (!bPositionCalculated)
+		{
+			DesiredLocation = PositionComponent->GetFixedWorldPosition();
+		}
+	}
 
-  if (CurrentState.ControlMode == EGlobalCameraControlMode::FirstPerson &&
-      CurrentState.Position.Equals(TargetState.Position, 3.f)) {
-    const float MoveSpeed = FMath::Max(CurrentState.MovementSpeed * 2.f, 40.f);
+	if (Current.Position.bUseCollision && CollisionComponent && GetWorld())
+	{
+		DesiredLocation = CollisionComponent->ResolveCameraPosition(
+			CollisionOrigin,
+			DesiredLocation,
+			CollisionTarget
+		);
+	}
 
-    const float PositionTolerance = 5.f;
+	bool bShouldUpdateStateRotation = false;
 
-    FVector NewLocation = FMath::VInterpTo(GetActorLocation(), DesiredLocation,
-                                           DeltaTime, MoveSpeed);
+	const FRotator DesiredRotation = RotationComponent->CalculateDesiredRotation(
+		Current,
+		DesiredLocation,
+		FollowTarget,
+		Player,
+		Connect,
+		bShouldUpdateStateRotation
+	);
 
-    if (FVector::DistSquared(NewLocation, DesiredLocation) <=
-        FMath::Square(PositionTolerance)) {
-      NewLocation = DesiredLocation;
-    }
+	if (bShouldUpdateStateRotation)
+	{
+		Current.Rotation.Rotation = DesiredRotation;
+		Target.Rotation.Rotation = DesiredRotation;
+	}
 
-    const bool bDirectMouseControl =
-        !CurrentState.bUseTargetRotation && !CurrentState.bLookAtTarget;
+	const bool bUseTargetRotationSpeed =
+		Current.Aim.bLookAtTarget || Current.Rotation.bUseTargetRotation;
 
-    const FRotator NewRotation =
-        bDirectMouseControl
-            ? CurrentState.Rotation
-            : FMath::RInterpConstantTo(
-                  GetActorRotation(), DesiredRotation, DeltaTime,
-                  FMath::Max(CurrentState.RotationSpeed, 0.01f) * 30.f);
+	const float RotationSpeed = bUseTargetRotationSpeed
+		? FMath::Max(Target.Movement.RotationSpeed, 2.f)
+		: Current.Movement.RotationSpeed;
 
-    SetActorLocationAndRotation(NewLocation, NewRotation);
-  } else {
-    if (TransitionMode == EGlobalCameraTransitionMode::Instant ||
-        DeltaTime <= 0.f ||
-        (!bUseTargetRotationSpeed && RotationSpeed <= 0.f) ||
-        CurrentState.MovementSpeed <= 0.f) {
-      SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
-    } else {
-      const FVector NewLocation =
-          FMath::VInterpTo(GetActorLocation(), DesiredLocation, DeltaTime,
-                           FMath::Max(CurrentState.MovementSpeed, 0.01f));
+	if (
+		Current.Control.ControlMode == EGlobalCameraControlMode::FirstPerson &&
+		Current.Position.Position.Equals(Target.Position.Position, 3.f)
+	)
+	{
+		const float MoveSpeed = FMath::Max(Current.Movement.MovementSpeed * 2.f, 40.f);
+		const float PositionTolerance = 5.f;
 
-      const bool bDirectMouseControl =
-          !CurrentState.bUseTargetRotation && !CurrentState.bLookAtTarget;
+		FVector NewLocation = FMath::VInterpTo(
+			GetActorLocation(),
+			DesiredLocation,
+			DeltaTime,
+			MoveSpeed
+		);
 
-      const FRotator NewRotation =
-          bDirectMouseControl
-              ? CurrentState.Rotation
-              : FMath::RInterpConstantTo(
-                    GetActorRotation(), DesiredRotation, DeltaTime,
-                    FMath::Max(RotationSpeed, 0.01f) * 30.f);
+		if (FVector::DistSquared(NewLocation, DesiredLocation) <= FMath::Square(PositionTolerance))
+		{
+			NewLocation = DesiredLocation;
+		}
 
-      SetActorLocationAndRotation(NewLocation, NewRotation);
-    }
-  }
+		const bool bDirectMouseControl =
+			!Current.Rotation.bUseTargetRotation && !Current.Aim.bLookAtTarget;
 
-  if (CameraComponent) {
-    CameraComponent->SetFieldOfView(CurrentState.FieldOfView);
-  }
+		const FRotator NewRotation = bDirectMouseControl
+			? Current.Rotation.Rotation
+			: FMath::RInterpConstantTo(
+				GetActorRotation(),
+				DesiredRotation,
+				DeltaTime,
+				FMath::Max(Current.Movement.RotationSpeed, 0.01f) * 30.f
+			);
+
+		SetActorLocationAndRotation(NewLocation, NewRotation);
+	}
+	else
+	{
+		if (
+			StateComponent->TransitionMode == EGlobalCameraTransitionMode::Instant ||
+			DeltaTime <= 0.f ||
+			(!bUseTargetRotationSpeed && RotationSpeed <= 0.f) ||
+			Current.Movement.MovementSpeed <= 0.f
+		)
+		{
+			SetActorLocationAndRotation(DesiredLocation, DesiredRotation);
+		}
+		else
+		{
+			const FVector NewLocation = FMath::VInterpTo(
+				GetActorLocation(),
+				DesiredLocation,
+				DeltaTime,
+				FMath::Max(Current.Movement.MovementSpeed, 0.01f)
+			);
+
+			const bool bDirectMouseControl =
+				!Current.Rotation.bUseTargetRotation && !Current.Aim.bLookAtTarget;
+
+			const FRotator NewRotation = bDirectMouseControl
+				? Current.Rotation.Rotation
+				: FMath::RInterpConstantTo(
+					GetActorRotation(),
+					DesiredRotation,
+					DeltaTime,
+					FMath::Max(RotationSpeed, 0.01f) * 30.f
+				);
+
+			SetActorLocationAndRotation(NewLocation, NewRotation);
+		}
+	}
+
+	if (CameraComponent)
+	{
+		CameraComponent->SetFieldOfView(Current.Lens.FieldOfView);
+	}
 }
-// _________________________________________
-// Target getters
-AActor *ASystemCamera::GetTarget() const {
-  return PlayerTarget ? PlayerTarget : ConnectTarget;
+
+AActor* ASystemCamera::GetTarget() const
+{
+	return TargetComponent ? TargetComponent->GetTarget() : nullptr;
 }
-AActor *
-ASystemCamera::GetPositionTarget(EGlobalCameraPositionMode PositionMode) const {
-  switch (PositionMode) {
-  case EGlobalCameraPositionMode::PlayerTarget:
-    return PlayerTarget;
-  case EGlobalCameraPositionMode::ConnectTarget:
-    return ConnectTarget;
-  default:
-    return nullptr;
-  }
+
+AActor* ASystemCamera::GetPositionTarget(EGlobalCameraPositionMode PositionMode) const
+{
+	return TargetComponent ? TargetComponent->GetPositionTarget(PositionMode) : nullptr;
 }
-AActor *ASystemCamera::GetFollowTarget() const {
-  switch (CurrentState.FollowTarget) {
-  case EGlobalCameraFollowTarget::PlayerTarget:
-    return PlayerTarget;
-  case EGlobalCameraFollowTarget::ConnectTarget:
-    return ConnectTarget;
-  default:
-    return nullptr;
-  }
+
+AActor* ASystemCamera::GetFollowTarget() const
+{
+	return TargetComponent
+		? TargetComponent->GetFollowTarget(CurrentState.Target.FollowTarget)
+		: nullptr;
 }
-AActor *ASystemCamera::GetRotationTarget() const {
-  return CurrentState.bUseTargetRotation ? GetFollowTarget() : nullptr;
+
+AActor* ASystemCamera::GetRotationTarget() const
+{
+	return TargetComponent
+		? TargetComponent->GetRotationTarget(
+			CurrentState.Target.FollowTarget,
+			CurrentState.Rotation.bUseTargetRotation
+		)
+		: nullptr;
 }
-void ASystemCamera::SetPlayerTarget(AActor *NewTarget) {
-  PlayerTarget = NewTarget;
+
+void ASystemCamera::SetPlayerTarget(AActor* NewTarget)
+{
+	PlayerTarget = NewTarget;
+
+	if (TargetComponent)
+	{
+		TargetComponent->SetPlayerTarget(NewTarget);
+	}
 }
-FVector ASystemCamera::GetWorldPositionFromState(
-    const FGlobalCameraState &State) const {
-  if (State.PositionMode == EGlobalCameraPositionMode::World) {
-    return State.Position;
-  }
-  if (AActor *Target = GetPositionTarget(State.PositionMode)) {
-    return Target->GetActorTransform().TransformPosition(State.Position);
-  }
-  return State.Position;
+
+void ASystemCamera::SetConnectTarget(AActor* NewTarget)
+{
+	ConnectTarget = NewTarget;
+
+	if (TargetComponent)
+	{
+		TargetComponent->SetConnectTarget(NewTarget);
+	}
 }
+
+FVector ASystemCamera::GetWorldPositionFromState(const FGlobalCameraState& State) const
+{
+	if (!PositionComponent)
+	{
+		return State.Position.Position;
+	}
+
+	return PositionComponent->GetWorldPositionFromState(
+		State,
+		GetPositionTarget(State.Position.PositionMode)
+	);
+}
+
 FVector ASystemCamera::GetRelativePositionFromWorld(
-    const FVector &WorldPosition,
-    EGlobalCameraPositionMode PositionMode) const {
-  if (AActor *Target = GetPositionTarget(PositionMode)) {
-    return Target->GetActorTransform().InverseTransformPosition(WorldPosition);
-  }
-  return WorldPosition;
+	const FVector& WorldPosition,
+	EGlobalCameraPositionMode PositionMode) const
+{
+	if (!PositionComponent)
+	{
+		return WorldPosition;
+	}
+
+	return PositionComponent->GetRelativePositionFromWorld(
+		WorldPosition,
+		GetPositionTarget(PositionMode)
+	);
 }
-// _________________________________________
-// Position space conversion
-void ASystemCamera::ConvertPositionSpace(
-    EGlobalCameraPositionMode NewPositionMode) {
-  const FVector WorldPosition = GetActorLocation();
-  CurrentState.Position =
-      GetRelativePositionFromWorld(WorldPosition, NewPositionMode);
-  CurrentState.Rotation = GetActorRotation();
-  if (CurrentState.FollowTarget == EGlobalCameraFollowTarget::None) {
-    FixedWorldPosition = WorldPosition;
-  }
-}
-// _________________________________________
-// Desired location calculation
-FVector ASystemCamera::CalculateDesiredLocation() const {
-  if (CurrentState.FollowTarget == EGlobalCameraFollowTarget::None) {
-    return FixedWorldPosition;
-  }
 
-  AActor *FollowTarget = GetFollowTarget();
+void ASystemCamera::ConvertPositionSpace(EGlobalCameraPositionMode NewPositionMode)
+{
+	if (!PositionComponent || !StateComponent)
+	{
+		return;
+	}
 
-  if (CurrentState.ControlMode == EGlobalCameraControlMode::ThirdPerson &&
-      CurrentState.FollowTarget == EGlobalCameraFollowTarget::ConnectTarget &&
-      IsValid(PlayerTarget)) {
-    FollowTarget = PlayerTarget;
-  }
+	PositionComponent->ConvertPositionSpace(
+		StateComponent->CurrentState,
+		NewPositionMode,
+		GetPositionTarget(NewPositionMode)
+	);
 
-  if (!IsValid(FollowTarget)) {
-    return FixedWorldPosition;
-  }
-
-  const FVector TargetLocation = FollowTarget->GetActorLocation();
-
-  if (CurrentState.ControlMode != EGlobalCameraControlMode::ThirdPerson) {
-    return TargetLocation + CurrentState.Position;
-  }
-
-  float OrbitYaw = CurrentState.OrbitYaw;
-
-  if (IsValid(PlayerTarget) && IsValid(ConnectTarget)) {
-    FVector DirectionToConnectTarget =
-        ConnectTarget->GetActorLocation() - PlayerTarget->GetActorLocation();
-
-    // Высота цели не должна менять орбиту камеры.
-    DirectionToConnectTarget.Z = 0.f;
-
-    if (!DirectionToConnectTarget.IsNearlyZero()) {
-      OrbitYaw = DirectionToConnectTarget.Rotation().Yaw;
-    }
-  }
-
-  const FVector OrbitCenter =
-      TargetLocation + FVector::UpVector * CurrentState.AimHeight;
-
-  const FRotator OrbitRotation(CurrentState.OrbitPitch, OrbitYaw, 0.f);
-
-  const float OrbitDistance = FMath::Max(CurrentState.OrbitDistance, 1.f);
-
-  const FVector DesiredLocation =
-      OrbitCenter - OrbitRotation.Vector() * OrbitDistance;
-
-  if (!CurrentState.bUseCollision || !GetWorld()) {
-    return DesiredLocation;
-  }
-
-  FHitResult Hit;
-  FCollisionQueryParams Params(SCENE_QUERY_STAT(SystemCameraCollision), false);
-
-  Params.AddIgnoredActor(FollowTarget);
-  Params.AddIgnoredActor(this);
-
-  const bool bHit = GetWorld()->SweepSingleByChannel(
-      Hit, OrbitCenter, DesiredLocation, FQuat::Identity, ECC_Camera,
-      FCollisionShape::MakeSphere(15.f), Params);
-
-  return bHit ? Hit.Location + Hit.Normal * 15.f : DesiredLocation;
+	PullStateFromComponents();
 }

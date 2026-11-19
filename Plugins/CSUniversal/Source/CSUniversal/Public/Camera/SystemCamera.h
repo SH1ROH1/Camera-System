@@ -7,6 +7,14 @@
 
 class UCameraComponent;
 class USceneComponent;
+class UCameraStateComponent;
+class UCameraTargetComponent;
+class UCameraPositionComponent;
+class UCameraCollisionComponent;
+class UCameraRotationComponent;
+class UCameraTransitionComponent;
+class UFirstPersonCameraComponent;
+class UOrbitCameraComponent;
 
 UCLASS()
 class CSUNIVERSAL_API ASystemCamera : public AActor
@@ -14,18 +22,12 @@ class CSUNIVERSAL_API ASystemCamera : public AActor
 	GENERATED_BODY()
 
 private:
-	FVector FixedWorldPosition = FVector::ZeroVector;
-
-	float CurrentRotationSpeed = 1.f;
-
 	void SetTransitionMode(EGlobalCameraTransitionMode NewMode);
 	void UpdateBlend(float DeltaTime);
-	void UpdatePositionState(float DeltaTime);
-	void UpdateRotationState(float DeltaTime);
-	void UpdateCameraSettings(float DeltaTime);
-	void UpdateControlSettings(float DeltaTime);
-	void UpdateDiscreteSettings();
 	void UpdateCameraTransform(float DeltaTime);
+	void UpdateDiscreteSettings();
+	void PushStateToComponents();
+	void PullStateFromComponents();
 
 	AActor* GetPositionTarget(EGlobalCameraPositionMode PositionMode) const;
 	AActor* GetFollowTarget() const;
@@ -42,15 +44,39 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	TObjectPtr<USceneComponent> Root;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UCameraStateComponent> StateComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UCameraTargetComponent> TargetComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UCameraPositionComponent> PositionComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UCameraCollisionComponent> CollisionComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UCameraRotationComponent> RotationComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UCameraTransitionComponent> TransitionComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UFirstPersonCameraComponent> FirstPersonComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Components")
+	TObjectPtr<UOrbitCameraComponent> OrbitComponent;
+
 	FVector GetWorldPositionFromState(const FGlobalCameraState& State) const;
 	FVector GetRelativePositionFromWorld(const FVector& WorldPosition, EGlobalCameraPositionMode PositionMode) const;
-	FVector CalculateDesiredLocation() const;
 
 public:
 	ASystemCamera();
 
 	virtual void Tick(float DeltaTime) override;
 
+	// Legacy state properties kept for existing Blueprint access.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	FGlobalCameraState CurrentState;
 
@@ -127,7 +153,7 @@ public:
 	void SetTargetAimSettings(float NewDistance, float NewHeight, EGlobalCameraTransitionMode NewMode = EGlobalCameraTransitionMode::Smooth);
 
 	UFUNCTION(BlueprintCallable, Category = "Camera|Mouse")
-    void SetTargetInvertThirdPersonPitch(bool bInvert, EGlobalCameraTransitionMode NewMode = EGlobalCameraTransitionMode::Smooth);
+	void SetTargetInvertThirdPersonPitch(bool bInvert, EGlobalCameraTransitionMode NewMode = EGlobalCameraTransitionMode::Smooth);
 
 	UFUNCTION(BlueprintCallable, Category = "Camera")
 	void UpdateCameraRotation(float LookX, float LookY);
@@ -145,6 +171,4 @@ public:
 	AActor* GetConnectTarget() const { return ConnectTarget; }
 
 	AActor* GetTarget() const;
-
-	
 };

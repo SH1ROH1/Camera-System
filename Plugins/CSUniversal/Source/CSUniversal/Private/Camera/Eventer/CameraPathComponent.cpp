@@ -150,7 +150,7 @@ bool UCameraPathComponent::FindClosestPathDistance(float& OutDistance) const
     return false;
   }
 
-  AActor* Target = GetPathTarget(Camera, CameraState.FollowTarget);
+  AActor* Target = GetPathTarget(Camera, CameraState.Target.FollowTarget);
 
   if (!IsValid(Target))
   {
@@ -174,7 +174,7 @@ void UCameraPathComponent::UpdatePath(float DeltaTime)
     return;
   }
 
-  AActor* Target = GetPathTarget(Camera, CameraState.FollowTarget);
+  AActor* Target = GetPathTarget(Camera, CameraState.Target.FollowTarget);
 
   if (!IsValid(Target))
   {
@@ -245,13 +245,13 @@ void UCameraPathComponent::UpdatePath(float DeltaTime)
 
   // Путь задаёт абсолютную мировую позицию. Иначе ThirdPerson использует
   // орбиту, а не позицию, вычисленную по сплайну.
-  PathState.PositionMode = EGlobalCameraPositionMode::World;
-  PathState.FollowTarget = EGlobalCameraFollowTarget::None;
-  PathState.Position = ActiveSpline->GetLocationAtDistanceAlongSpline(
+  PathState.Position.PositionMode = EGlobalCameraPositionMode::World;
+  PathState.Target.FollowTarget = EGlobalCameraFollowTarget::None;
+  PathState.Position.Position = ActiveSpline->GetLocationAtDistanceAlongSpline(
       CurrentPathDistance,
       ESplineCoordinateSpace::World);
 
-  if (PathState.bUsePathRotation)
+  if (PathState.Rotation.bUsePathRotation)
   {
     const FVector Tangent = ActiveSpline->GetTangentAtDistanceAlongSpline(
         CurrentPathDistance,
@@ -259,9 +259,9 @@ void UCameraPathComponent::UpdatePath(float DeltaTime)
 
     if (!Tangent.IsNearlyZero())
     {
-      PathState.Rotation = Tangent.Rotation();
-      PathState.bUseTargetRotation = false;
-      PathState.bLookAtTarget = false;
+      PathState.Rotation.Rotation = Tangent.Rotation();
+      PathState.Rotation.bUseTargetRotation = false;
+      PathState.Aim.bLookAtTarget = false;
     }
   }
 
