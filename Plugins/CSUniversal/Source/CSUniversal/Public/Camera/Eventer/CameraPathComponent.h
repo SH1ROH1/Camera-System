@@ -11,7 +11,7 @@ class ASystemCamera;
 class USplineComponent;
 
 UCLASS(ClassGroup = (Camera), meta = (BlueprintSpawnableComponent))
-class CSFIRSTPERSON_API UCameraPathComponent : public UActorComponent {
+class CSUNIVERSAL_API UCameraPathComponent : public UActorComponent {
   GENERATED_BODY()
 
 public:

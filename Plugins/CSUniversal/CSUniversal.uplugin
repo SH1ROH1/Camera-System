@@ -2,8 +2,8 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "CSFirstPerson",
-	"Description": "FirstPerson version",
+	"FriendlyName": "CSUniversal",
+	"Description": "Universal Camera System",
 	"Category": "Camera",
 	"CreatedBy": "Shirohi",
 	"CreatedByURL": "",
@@ -16,7 +16,7 @@
 	"Installed": true,
 	"Modules": [
 		{
-			"Name": "CSFirstPerson",
+			"Name": "CSUniversal",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}

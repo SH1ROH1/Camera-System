@@ -11,7 +11,7 @@
 #include "SystemCameraEventer.generated.h"
 
 UCLASS(Blueprintable)
-class CSFIRSTPERSON_API ASystemCameraEventer : public ATriggerVolume {
+class CSUNIVERSAL_API ASystemCameraEventer : public ATriggerVolume {
   GENERATED_BODY()
 
 public:

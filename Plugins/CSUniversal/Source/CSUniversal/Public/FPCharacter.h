@@ -8,7 +8,7 @@
 class ASystemCamera;
 
 UCLASS()
-class CSFIRSTPERSON_API AFPCharacter : public ACharacter {
+class CSUNIVERSAL_API AFPCharacter : public ACharacter {
   GENERATED_BODY()
 
 public:

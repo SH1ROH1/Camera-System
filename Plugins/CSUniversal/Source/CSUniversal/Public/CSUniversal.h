@@ -4,7 +4,7 @@
 
 #include "Modules/ModuleManager.h"
 
-class FCSFirstPersonModule : public IModuleInterface
+class FCSUniversalModule : public IModuleInterface
 {
 public:
 

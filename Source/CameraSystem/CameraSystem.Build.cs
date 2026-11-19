@@ -17,7 +17,7 @@ public class CameraSystem : ModuleRules
                 "Slate",
                 "SlateCore",
                 "UMG",
-				"CSFirstPerson",
+				"CSUniversal",
 		});
 
 		// Uncomment if you are using Slate UI

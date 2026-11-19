@@ -9,7 +9,7 @@ class UCameraComponent;
 class USceneComponent;
 
 UCLASS()
-class CSFIRSTPERSON_API ASystemCamera : public AActor
+class CSUNIVERSAL_API ASystemCamera : public AActor
 {
 	GENERATED_BODY()
 

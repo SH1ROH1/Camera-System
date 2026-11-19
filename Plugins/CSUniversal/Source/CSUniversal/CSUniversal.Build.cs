@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class CSFirstPerson : ModuleRules
+public class CSUniversal : ModuleRules
 {
-	public CSFirstPerson(ReadOnlyTargetRules Target) : base(Target)
+	public CSUniversal(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		

@@ -53,7 +53,7 @@ struct FGlobalCameraEventerPreset {
 };
 
 UCLASS()
-class CSFIRSTPERSON_API UGlobalCameraPresetData : public UDataAsset {
+class CSUNIVERSAL_API UGlobalCameraPresetData : public UDataAsset {
   GENERATED_BODY()
 
 public:
