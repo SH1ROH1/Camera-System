@@ -72,6 +72,8 @@ private:
 
   // Runtime
   bool bTriggered = false;
+  
+  TWeakObjectPtr<AActor> TriggeredActor;
 
   // Functions
   void CheckExistingOverlap();

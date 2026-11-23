@@ -26,4 +26,13 @@ struct FCameraEventerActionSettings {
 
   UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path")
   FCameraPathSettings PathSettings;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake")
+	TSubclassOf<UCameraShakeBase> ShakeClass;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake")
+	bool bStartShake = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake")
+	bool bStopShake = false;
 };

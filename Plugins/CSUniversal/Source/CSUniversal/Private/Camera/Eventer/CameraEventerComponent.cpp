@@ -2,6 +2,9 @@
 #include "Camera/Eventer/CameraPathComponent.h"
 #include "Camera/SystemCamera.h"
 #include "EngineUtils.h"
+#include "Camera/CameraShakeBase.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
 
 UCameraEventerComponent::UCameraEventerComponent() {
   PrimaryComponentTick.bCanEverTick = false;
@@ -49,6 +52,36 @@ void UCameraEventerComponent::ApplyAction(
     }
   } else if (IsValid(PathComponent)) {
     PathComponent->StopPath();
+  }
+  
+  if (!Action.ShakeClass)
+    return;
+
+  APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+
+  if (!IsValid(PlayerController))
+    return;
+
+  APlayerCameraManager* CameraManager = PlayerController->PlayerCameraManager;
+
+  if (!IsValid(CameraManager))
+    return;
+
+  if (Action.bStartShake)
+  {
+    CameraManager->StartCameraShake(
+        Action.ShakeClass,
+        1.0f,
+        ECameraShakePlaySpace::CameraLocal,
+        FRotator::ZeroRotator
+    );
+  }
+  else if (Action.bStopShake)
+  {
+    CameraManager->StopAllInstancesOfCameraShake(
+        Action.ShakeClass,
+        false
+    );
   }
 }
 

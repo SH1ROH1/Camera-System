@@ -6,6 +6,7 @@
 #include "FPCharacter.generated.h"
 
 class ASystemCamera;
+class UCameraShakeBase;
 
 UCLASS()
 class CSUNIVERSAL_API AFPCharacter : public ACharacter {
@@ -23,6 +24,32 @@ public:
   bool bUseMouseLook = true;
 
 protected:
+  
+  // shake 
+  UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera|Shake")
+  TSubclassOf<UCameraShakeBase> MovementShakeClass;
+
+  UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera|Shake",
+      meta = (ClampMin = "0.0"))
+  float MinShakeSpeed = 100.0f;
+
+  UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera|Shake",
+      meta = (ClampMin = "0.0"))
+  float MaxShakeSpeed = 600.0f;
+
+  UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera|Shake",
+      meta = (ClampMin = "0.0"))
+  float MinShakeScale = 0.2f;
+
+  UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Camera|Shake",
+      meta = (ClampMin = "0.0"))
+  float MaxShakeScale = 1.0f;
+
+  UPROPERTY(Transient)
+  TObjectPtr<UCameraShakeBase> MovementShakeInstance;
+
+  void UpdateMovementShake();
+  
   // Camera
   UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
   TSubclassOf<ASystemCamera> CameraClass;

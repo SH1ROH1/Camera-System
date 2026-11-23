@@ -8,6 +8,9 @@
 #include "Components/InputComponent.h"
 // Camera
 #include "Camera/SystemCamera.h"
+// Shake 
+#include "Camera/CameraShakeBase.h"
+#include "Camera/PlayerCameraManager.h"
 
 
 AFPCharacter::AFPCharacter()
@@ -65,6 +68,7 @@ void AFPCharacter::Tick(float DeltaTime)
 
 	ApplyMovement(DeltaTime);
 	UpdateCameraRotation(DeltaTime);
+	UpdateMovementShake();
 }
 
 void AFPCharacter::Move_X(float Value)
@@ -125,3 +129,69 @@ void AFPCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 ASystemCamera* AFPCharacter::GetCameraActor() const { return CameraActor; }
 
+void AFPCharacter::UpdateMovementShake()
+{
+	if (!MovementShakeClass)
+		return;
+	
+	if (CameraActor->GetCameraControlMode() == EGlobalCameraControlMode::None)
+	{
+		if (IsValid(MovementShakeInstance))
+		{
+			MovementShakeInstance->StopShake(false);
+			MovementShakeInstance = nullptr;
+		}
+		return;
+	}
+
+	const float Speed = GetVelocity().Size2D();
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+
+	if (!IsValid(PC) || !IsValid(PC->PlayerCameraManager))
+		return;
+
+	APlayerCameraManager* CameraManager = PC->PlayerCameraManager;
+
+	if (MaxShakeSpeed <= MinShakeSpeed)
+		return;
+
+	if (Speed < MinShakeSpeed)
+	{
+		if (IsValid(MovementShakeInstance))
+		{
+			MovementShakeInstance->StopShake(false);
+			MovementShakeInstance = nullptr;
+		}
+
+		return;
+	}
+
+	const float Alpha = FMath::Clamp(
+		(Speed - MinShakeSpeed) / (MaxShakeSpeed - MinShakeSpeed),
+		0.0f,
+		1.0f
+	);
+
+	const float ShakeScale = FMath::Lerp(
+		MinShakeScale,
+		MaxShakeScale,
+		Alpha
+	);
+
+	if (!IsValid(MovementShakeInstance) ||
+		MovementShakeInstance->IsFinished() ||
+		!MovementShakeInstance->IsActive())
+	{
+		MovementShakeInstance = CameraManager->StartCameraShake(
+			MovementShakeClass,
+			ShakeScale,
+			ECameraShakePlaySpace::CameraLocal,
+			FRotator::ZeroRotator
+		);
+	}
+	else
+	{
+		MovementShakeInstance->ShakeScale = ShakeScale;
+	}
+}

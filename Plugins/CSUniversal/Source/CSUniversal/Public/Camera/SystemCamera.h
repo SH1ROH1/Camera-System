@@ -16,6 +16,8 @@ class UCameraTransitionComponent;
 class UFirstPersonCameraComponent;
 class UOrbitCameraComponent;
 
+class ASystemCameraEventer; 
+
 UCLASS()
 class CSUNIVERSAL_API ASystemCamera : public AActor
 {
@@ -34,7 +36,8 @@ private:
 	AActor* GetRotationTarget() const;
 
 	void ConvertPositionSpace(EGlobalCameraPositionMode NewPositionMode);
-
+	
+	ASystemCameraEventer* LastTgiggeredEventer = nullptr;
 protected:
 	virtual void BeginPlay() override;
 
@@ -106,6 +109,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Camera")
 	FGlobalCameraState GetTargetState() const { return TargetState; }
+	
+	EGlobalCameraControlMode GetCameraControlMode() const { return CurrentState.Control.ControlMode; }
 
 	UFUNCTION(BlueprintCallable, Category = "Camera|Target")
 	void SetTargetPosition(FVector NewPosition, EGlobalCameraTransitionMode NewMode = EGlobalCameraTransitionMode::Smooth);
@@ -171,4 +176,10 @@ public:
 	AActor* GetConnectTarget() const { return ConnectTarget; }
 
 	AActor* GetTarget() const;
+	
+	UFUNCTION(BlueprintCallable, Category = "Camera | Eventer")
+	ASystemCameraEventer* GetLastTriggeredEventer() const { return LastTgiggeredEventer; }
+	UFUNCTION(BlueprintCallable, Category = "Camera | Eventer")
+	void SetLastTriggeredEventer(ASystemCameraEventer* NewEventer) { LastTgiggeredEventer = NewEventer; };
+	
 };
